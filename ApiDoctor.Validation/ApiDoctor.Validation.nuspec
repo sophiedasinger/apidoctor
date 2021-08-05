@@ -11,9 +11,10 @@
         <releaseNotes>Check http://github.com/onedrive/apidoctor for details.</releaseNotes>
         <licenseUrl>http://msdn.microsoft.com/en-US/cc300389</licenseUrl>
         <copyright>© Microsoft Corporation. All rights reserved.</copyright>
+        <projectUrl>http://github.com/onedrive/apidoctor</projectUrl>
         <dependencies>
             <group targetFramework=".NETFramework4.5">
-                <dependency id="Newtonsoft.Json" version="6.0.8" />
+                <dependency id="Newtonsoft.Json" version="12.0.3" />
             </group>
         </dependencies>
         <frameworkAssemblies>
