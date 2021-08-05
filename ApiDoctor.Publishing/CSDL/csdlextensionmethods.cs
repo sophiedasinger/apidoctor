@@ -84,6 +84,7 @@ namespace ApiDoctor.Publishing.CSDL
 
             // Normalize function params
             var substitutions = new Dictionary<string, string>();
+            var parenIndex = path.IndexOf('(');
             for (int i = 0; i < path.Length; i++)
             {
                 if (path[i] == '(')
@@ -93,7 +94,7 @@ namespace ApiDoctor.Publishing.CSDL
                     if (close > -1)
                     {
                         var inner = path.Substring(i + 1, close - i - 1);
-                        substitutions[inner] = NormalizeFunctionParameters(inner, issues.For(method.Identifier));
+                        substitutions[inner] = NormalizeFunctionParameters(inner, issues);
                         i = close;
                     }
                 }
@@ -125,8 +126,7 @@ namespace ApiDoctor.Publishing.CSDL
                 var kvp = param.Split('=');
                 if (kvp.Length != 2)
                 {
-                    issues.Error(ValidationErrorCode.ParameterParserError, $"Malformed function params {funcParams}. " +
-                        $"Expected key-value params e.g. /function1(key=value). Remove parentheses if no params are expected.");
+                    issues.Error(ValidationErrorCode.ParameterParserError, $"Malformed function params {funcParams}");
                     return funcParams;
                 }
 

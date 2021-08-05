@@ -31,9 +31,10 @@ namespace ApiDoctor.ConsoleApp
     using System.IO;
     using System.Linq;
     using System.Net;
+    using System.Net.Http;
+    using System.Runtime.InteropServices;
     using System.Text;
     using System.Text.RegularExpressions;
-    using System.Threading;
     using System.Threading.Tasks;
     using ApiDoctor.DocumentationGeneration;
     using ApiDoctor.Validation.Config;
@@ -74,41 +75,37 @@ namespace ApiDoctor.ConsoleApp
             if (args.Length > 0)
                 FancyConsole.WriteLine("Command line: " + args.ComponentsJoinedByString(" "));
 
-            try
+            string verbName = null;
+            BaseOptions verbOptions = null;
+
+            var options = new CommandLineOptions();
+            if (!Parser.Default.ParseArguments(args, options,
+              (verb, subOptions) =>
+              {
+                  // if parsing succeeds the verb name and correct instance
+                  // will be passed to onVerbCommand delegate (string,object)
+                  verbName = verb;
+                  verbOptions = (BaseOptions)subOptions;
+              }))
             {
-                Parser.Default.ParseArguments<PrintOptions, CheckLinkOptions, BasicCheckOptions, CheckAllLinkOptions, CheckServiceOptions, PublishOptions, PublishMetadataOptions, CheckMetadataOptions, FixDocsOptions, GenerateDocsOptions, GenerateSnippetsOptions, AboutOptions>(args)
-                        .WithParsed<BaseOptions>((options) =>
-                        {
-                            IgnoreErrors = options.IgnoreErrors;
+                FancyConsole.WriteLine(ConsoleColor.Red, "COMMAND LINE PARSE ERROR");
+                Exit(failure: true);
+            }
+
+            IgnoreErrors = verbOptions.IgnoreErrors;
 #if DEBUG
-                            if (options.AttachDebugger == 1)
-                            {
-                                Debugger.Launch();
-                            }
+            if (verbOptions.AttachDebugger == 1)
+            {
+                Debugger.Launch();
+            }
 #endif
 
-                            SetStateFromOptions(options);
-                        })    
-                        .MapResult(
-                            (PrintOptions options) => RunInvokedMethodAsync(options),
-                            (CheckLinkOptions options) => RunInvokedMethodAsync(options),
-                            (BasicCheckOptions options) => RunInvokedMethodAsync(options),
-                            (CheckAllLinkOptions options) => RunInvokedMethodAsync(options),
-                            (CheckServiceOptions options) => RunInvokedMethodAsync(options),
-                            (PublishOptions options) => RunInvokedMethodAsync(options),
-                            (PublishMetadataOptions options) => RunInvokedMethodAsync(options),
-                            (CheckMetadataOptions options) => RunInvokedMethodAsync(options),
-                            (FixDocsOptions options) => RunInvokedMethodAsync(options),
-                            (GenerateDocsOptions options) => RunInvokedMethodAsync(options),
-                            (AboutOptions options) => RunInvokedMethodAsync(options),
-                            (GenerateSnippetsOptions options) => RunInvokedMethodAsync(options),
-                            (errors) =>
-                                    {
-                                        FancyConsole.WriteLine(ConsoleColor.Red, "COMMAND LINE PARSE ERROR");
-                                        Exit(failure: true);
-                                        return Task.FromResult(default(BaseOptions));
-                                    })
-                        .Wait();
+            SetStateFromOptions(verbOptions);
+
+            var task = Task.Run(() => RunInvokedMethodAsync(options, verbName, verbOptions));
+            try
+            {
+                task.Wait();
             }
             catch (Exception ex)
             {
@@ -169,7 +166,8 @@ namespace ApiDoctor.ConsoleApp
                     Console.WriteLine("Using configuration file: {0}", CurrentConfiguration.SourcePath);
             }
         }
-        private static async Task RunInvokedMethodAsync(BaseOptions options)
+
+        private static async Task RunInvokedMethodAsync(CommandLineOptions origCommandLineOpts, string invokedVerb, BaseOptions options)
         {
             var issues = new IssueLogger()
             {
@@ -178,9 +176,11 @@ namespace ApiDoctor.ConsoleApp
 #endif
             };
 
-            if (!options.HasRequiredProperties(out var missingProps))
+            string[] missingProps;
+            if (!options.HasRequiredProperties(out missingProps))
             {
                 issues.Error(ValidationErrorCode.MissingRequiredArguments, $"Command line is missing required arguments: {missingProps.ComponentsJoinedByString(", ")}");
+                FancyConsole.WriteLine(origCommandLineOpts.GetUsage(invokedVerb));
                 await WriteOutErrorsAndFinishTestAsync(issues, options.SilenceWarnings, printFailuresOnly: options.PrintFailuresOnly);
                 Exit(failure: true);
             }
@@ -189,42 +189,42 @@ namespace ApiDoctor.ConsoleApp
 
             bool returnSuccess = true;
 
-            switch (options)
+            switch (invokedVerb)
             {
-                case PrintOptions o:
-                    await PrintDocInformationAsync(o, issues);
+                case CommandLineOptions.VerbPrint:
+                    await PrintDocInformationAsync((PrintOptions)options, issues);
                     break;
-                case CheckAllLinkOptions o:
-                    returnSuccess = await CheckDocsAllAsync(o, issues);
+                case CommandLineOptions.VerbCheckLinks:
+                    returnSuccess = await CheckLinksAsync((CheckLinkOptions)options, issues);
                     break;
-                case CheckServiceOptions o:
-                    returnSuccess = await CheckServiceAsync(o, issues);
+                case CommandLineOptions.VerbDocs:
+                    returnSuccess = await CheckDocsAsync((BasicCheckOptions)options, issues);
                     break;
-                case GenerateDocsOptions o:
-                    returnSuccess = await GenerateDocsAsync(o);
+                case CommandLineOptions.VerbCheckAll:
+                    returnSuccess = await CheckDocsAllAsync((CheckLinkOptions)options, issues);
                     break;
-                case FixDocsOptions o:
-                    returnSuccess = await FixDocsAsync(o, issues);
+                case CommandLineOptions.VerbService:
+                    returnSuccess = await CheckServiceAsync((CheckServiceOptions)options, issues);
                     break;
-                case CheckLinkOptions o:
-                    returnSuccess = await CheckLinksAsync(o, issues);
+                case CommandLineOptions.VerbPublish:
+                    returnSuccess = await PublishDocumentationAsync((PublishOptions)options, issues);
                     break;
-                case GenerateSnippetsOptions o:
-                    returnSuccess = await GenerateSnippetsAsync(o, issues);
+                case CommandLineOptions.VerbPublishMetadata:
+                    returnSuccess = await PublishMetadataAsync((PublishMetadataOptions)options, issues);
                     break;
-                case BasicCheckOptions o:
-                    returnSuccess = await CheckDocsAsync(o, issues);
+                case CommandLineOptions.VerbMetadata:
+                    await CheckServiceMetadataAsync((CheckMetadataOptions)options, issues);
                     break;
-                case PublishOptions o:
-                    returnSuccess = await PublishDocumentationAsync(o, issues);
+                case CommandLineOptions.VerbGenerateDocs:
+                    returnSuccess = await GenerateDocsAsync((GenerateDocsOptions)options);
                     break;
-                case PublishMetadataOptions o:
-                    returnSuccess = await PublishMetadataAsync(o, issues);
+                case CommandLineOptions.VerbFix:
+                    returnSuccess = await FixDocsAsync((FixDocsOptions)options, issues);
                     break;
-                case CheckMetadataOptions o:
-                    await CheckServiceMetadataAsync(o, issues);
+                case CommandLineOptions.VerbGenerateSnippets:
+                    returnSuccess = await GenerateSnippetsAsync((GenerateSnippetsOptions)options, issues);
                     break;
-                case AboutOptions o:
+                case CommandLineOptions.VerbAbout:
                     PrintAboutMessage();
                     Exit(failure: false);
                     break;
@@ -234,7 +234,7 @@ namespace ApiDoctor.ConsoleApp
                 issues,
                 options.IgnoreWarnings,
                 indent: "  ",
-                printUnusedSuppressions: options is CheckAllLinkOptions);
+                printUnusedSuppressions: invokedVerb == CommandLineOptions.VerbCheckAll);
 
             if (returnSuccess)
             {
@@ -1301,6 +1301,15 @@ namespace ApiDoctor.ConsoleApp
                 exitCode = ExitCodeSuccess;
             }
 
+#if DEBUG
+            Console.WriteLine("Exit code: " + exitCode);
+            if (Debugger.IsAttached)
+            {
+                Console.WriteLine();
+                Console.Write("Press any key to exit.");
+                Console.ReadKey();
+            }
+#endif
 
             Environment.Exit(exitCode);
         }
@@ -1854,7 +1863,7 @@ namespace ApiDoctor.ConsoleApp
                         {
                             RelaxedStringValidation = true,
                             IgnorablePropertyTypes = metadataValidationConfigs?.IgnorableModels,
-                            AllowTruncatedResponses = modelConfigs?.TruncatedProprtiesValidation ?? false
+                            AllowTruncatedResponses = modelConfigs?.SkipProprtiesValidation ?? false
                         }
                     );
                 }
@@ -1908,7 +1917,7 @@ namespace ApiDoctor.ConsoleApp
             FancyConsole.WriteLine(FancyConsole.ConsoleSuccessColor, "Generating snippets from Snippets API..");
 
             var guid = Guid.NewGuid().ToString();
-            var snippetsPath = Path.Combine(Path.GetTempPath(), guid);
+            var snippetsPath = Path.Combine(Environment.GetEnvironmentVariable("TEMP"), guid);
             Directory.CreateDirectory(snippetsPath);
 
             WriteHttpSnippetsIntoFile(snippetsPath, methods, issues);
@@ -1949,8 +1958,6 @@ namespace ApiDoctor.ConsoleApp
                         var codeSnippet = File.ReadAllText(fileFullPath);
                         InjectSnippetIntoFile(method, codeSnippet, lang);
                     }
-                    else
-                        FancyConsole.WriteLine(FancyConsole.ConsoleErrorColor, "Error: file does not exist");
                 }
             }
 
@@ -1967,38 +1974,7 @@ namespace ApiDoctor.ConsoleApp
         /// <param name="args">arguments to snippet generator</param>
         private static void GenerateSnippets(string executablePath, params string[] args)
         {
-            var startInfo = new ProcessStartInfo(executablePath, string.Join(" ", args))
-            {
-                RedirectStandardError = true,
-                RedirectStandardOutput = true,
-            };
-            using var process = Process.Start(startInfo);
-            using var outputWaitHandle = new AutoResetEvent(false);
-            using var errorWaitHandle = new AutoResetEvent(false);
-            process.OutputDataReceived += (sender, e) => {
-                if (string.IsNullOrEmpty(e.Data))
-                {
-                    outputWaitHandle.Set();
-                }
-                else
-                {
-                    FancyConsole.WriteLine(FancyConsole.ConsoleErrorColor, "Error when generating code snippets!!!");
-                    FancyConsole.Write(FancyConsole.ConsoleErrorColor, e.Data);
-                }
-            };
-            process.ErrorDataReceived += (sender, e) =>
-            {
-                if (string.IsNullOrEmpty(e.Data))
-                {
-                    errorWaitHandle.Set();
-                }
-                else
-                {
-                    FancyConsole.Write(FancyConsole.ConsoleDefaultColor, e.Data);
-                }
-            };
-            process.BeginOutputReadLine();
-            process.BeginErrorReadLine();
+            var process = Process.Start(executablePath, string.Join(" ", args));
             process.WaitForExit();
         }
 
@@ -2063,12 +2039,6 @@ namespace ApiDoctor.ConsoleApp
                 File.WriteAllText(fileFullPath, request.FullHttpText(true));
             }
         }
-        /// <summary>
-        /// Replaces \ by / to keep output mardown consistent accross generation OSes
-        /// </summary>
-        /// <param name="original">The original path</param>
-        /// <returns>The cleaned up result</returns>
-        private static string ReplaceWindowsByLinuxPathSeparators(string original) => original.Replace("\\", "/");
 
         /// <summary>
         /// Finds the file the request is located and inserts the code snippet into the file.
@@ -2089,18 +2059,18 @@ namespace ApiDoctor.ConsoleApp
             var parseStatus = "FindIdentifierLine";
 
             /* Useful File names and data*/
-            var relativePathFolder = Path.Combine("includes", "snippets");
+            const string relativePathFolder = "includes/snippets/";
             const string includeSdkFileName = "snippets-sdk-documentation-link.md";
             const string firstTabText = "\r\n# [HTTP](#tab/http)";
 
             var codeFenceString = language.ToLower().Replace("#", "sharp").Replace("objective-c", "objc");
-            var relativePathSnippetsFolder = Path.Combine(relativePathFolder, codeFenceString);
+            var relativePathSnippetsFolder = relativePathFolder + codeFenceString + "/";
 
             var snippetFileName = methodString + $"-{codeFenceString}-snippets.md";
 
             var includeText = $"# [{language}](#tab/{codeFenceString})\r\n" +
-                              $"[!INCLUDE [sample-code](../{ReplaceWindowsByLinuxPathSeparators(Path.Combine(relativePathSnippetsFolder, snippetFileName))})]\r\n" +
-                              $"[!INCLUDE [sdk-documentation](../{ReplaceWindowsByLinuxPathSeparators(Path.Combine(relativePathFolder, includeSdkFileName))})]\r\n";
+                              $"[!INCLUDE [sample-code](../{relativePathSnippetsFolder}{snippetFileName})]\r\n" +
+                              $"[!INCLUDE [sdk-documentation](../{relativePathFolder}{includeSdkFileName})]\r\n";
 
             const string includeSdkText = "<!-- markdownlint-disable MD041-->\r\n\r\n" +
                                           "> Read the [SDK documentation](https://docs.microsoft.com/graph/sdks/sdks-overview) " +
@@ -2168,7 +2138,7 @@ namespace ApiDoctor.ConsoleApp
                         if (originalFileContents[currentIndex].Contains($"(#tab/{codeFenceString})"))
                         {
                             originalFileContents[currentIndex] = $"# [{language}](#tab/{codeFenceString})";
-                            originalFileContents[currentIndex + 1] = $"[!INCLUDE [sample-code](../{ReplaceWindowsByLinuxPathSeparators(Path.Combine(relativePathSnippetsFolder, snippetFileName))})]";//update include link. Just in case.
+                            originalFileContents[currentIndex + 1] = $"[!INCLUDE [sample-code](../{relativePathSnippetsFolder}{snippetFileName})]";//update include link. Just in case.
                             includeText = "";
                         }
                         break;
@@ -2190,13 +2160,12 @@ namespace ApiDoctor.ConsoleApp
                     updatedFileContents = FileSplicer(updatedFileContents.ToArray(), requestStartLine-1, firstTabText);//inject the first tab section
 
                     /* DUMP THE SDK LINK FILE */
-                    var sdkLinkDirectory = Path.Combine(Directory.GetParent(Path.GetDirectoryName(method.SourceFile.FullPath)).FullName, relativePathFolder);
+                    var sdkLinkDirectory = Directory.GetParent(Path.GetDirectoryName(method.SourceFile.FullPath)) + "/" + relativePathFolder;
                     Directory.CreateDirectory(sdkLinkDirectory);
                     // only dump a new file when it does not exist.
-                    var fullFileName = Path.Combine(sdkLinkDirectory, includeSdkFileName);
-                    if (!File.Exists(fullFileName))
+                    if (!File.Exists(sdkLinkDirectory + "/" + includeSdkFileName))
                     {
-                        File.WriteAllText(fullFileName, includeSdkText);
+                        File.WriteAllText(sdkLinkDirectory + "/" + includeSdkFileName, includeSdkText);
                     }
                     break;
                 }
@@ -2217,11 +2186,9 @@ namespace ApiDoctor.ConsoleApp
                                       $"\r\n```{codeFenceString}\r\n" +     //code fence
                                       $"\r\n{codeSnippet}\r\n" +            //generated snippet
                                       "\r\n```";                            //closing fence
-            var directory = Path.Combine(Directory.GetParent(Path.GetDirectoryName(method.SourceFile.FullPath)).FullName, relativePathSnippetsFolder);
+            var directory = Directory.GetParent(Path.GetDirectoryName(method.SourceFile.FullPath)) + "/" + relativePathSnippetsFolder;
             Directory.CreateDirectory(directory);//Make sure snippet file directory exists
-            var mdFilePath = Path.Combine(directory, snippetFileName);
-            FancyConsole.WriteLine(FancyConsole.ConsoleSuccessColor, $"Writing snippet to {mdFilePath}");
-            File.WriteAllText(mdFilePath, snippetFileContents);//write snippet to file
+            File.WriteAllText(directory + "/" + snippetFileName, snippetFileContents);//write snippet to file
 
         }
 
@@ -2306,15 +2273,15 @@ namespace ApiDoctor.ConsoleApp
             return true;
         }
 
-        private static ResourceDefinition GetResoureDocumentation(ResourceDefinition resource, ResourceDefinition[] documentedResources, bool? shouldValidateNamespace)
+        private static ResourceDefinition GetResoureDocumentation(ResourceDefinition resource, ResourceDefinition[] documentedResources, bool? shouldValidateNameSpace)
         {
-            IEnumerable<ResourceDefinition> docResourceQuery = shouldValidateNamespace == true
+            IEnumerable<ResourceDefinition> docResourceQuery = (shouldValidateNameSpace == false)
                 ? from dr in documentedResources
-                  where dr.Name == resource.Name || (!string.IsNullOrEmpty(dr.SourceFile?.Namespace) && dr.Name == dr.SourceFile?.Namespace + "." + resource.Name.TypeOnly())
+                  where dr.Name.TypeOnly() == resource.Name.TypeOnly()
                   select dr
 
                 : from dr in documentedResources
-                  where dr.Name.TypeOnly() == resource.Name.TypeOnly()
+                  where dr.Name == resource.Name
                   select dr
                 ;
 

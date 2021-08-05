@@ -19,7 +19,8 @@ perform for the following validations:
 * Publish documentation to an output folder.
 
 ## Building
-To build the project, invoke `dotnet build`. The tool has been upgraded to use dotnet core.
+To build the project, invoke either `msbuild` or `xbuild` depending on your
+platform. This tool is compatible with Mono or .NET.
 
 ## Command Line Tool
 

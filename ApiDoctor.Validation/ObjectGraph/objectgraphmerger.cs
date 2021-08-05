@@ -1,5 +1,4 @@
-﻿using Microsoft.AspNetCore.WebUtilities;
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -361,8 +360,8 @@ namespace ApiDoctor.Validation.Utility
             var output = new Dictionary<object, object>();
             if (equivalentValues != null)
             {
-                var values = QueryHelpers.ParseQuery(equivalentValues);
-                foreach (var key in values.Keys)
+                var values = System.Web.HttpUtility.ParseQueryString(equivalentValues);
+                foreach (var key in values.AllKeys)
                 {
                     output[key] = values[key];
                 }

@@ -587,8 +587,7 @@ namespace ApiDoctor.Validation
         private void VerifyResponseBody(HttpResponse actualResponse, HttpResponse expectedResponse, IssueLogger issues, ValidationOptions options = null)
         {
             if (string.IsNullOrEmpty(actualResponse.Body) &&
-                ((expectedResponse != null && !string.IsNullOrEmpty(expectedResponse.Body)) || 
-                 (this.ExpectedResponseMetadata != null && this.ExpectedResponseMetadata.ResourceType != null)))
+                (expectedResponse != null && !string.IsNullOrEmpty(expectedResponse.Body)))
             {
                 issues.Error(ValidationErrorCode.HttpBodyExpected, "Body missing from response (expected response includes a body or a response type was provided).");
             }
